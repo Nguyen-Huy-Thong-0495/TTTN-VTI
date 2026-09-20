@@ -19,6 +19,17 @@ export const updateEmailStatus = async (id: string, status: string): Promise<Ema
 };
 
 // 4. Gửi email phản hồi do AI gợi ý
-export const sendReplyEmail = async (id: string, replyMessage: string): Promise<void> => {
-    await api.post(`/emails/${id}/reply`, { replyMessage });
+export const sendReplyEmail = async (
+    to: string,
+    subject: string,
+    replyContent: string,
+    emailId?: string
+) => {
+    const response = await api.post('/emails/send-reply', {
+        to,
+        subject,
+        replyContent,
+        emailId
+    });
+    return response.data;
 };

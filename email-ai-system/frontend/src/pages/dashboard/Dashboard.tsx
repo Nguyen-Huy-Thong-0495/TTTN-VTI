@@ -5,15 +5,19 @@ import {
     Send,
     AlertTriangle,
     RefreshCw,
-    Loader2
+    Loader2,
+    CheckCircle
 } from 'lucide-react';
 import { EmailItem } from '../../types/email';
-import { getEmails, syncEmails } from '../../services/emailService';
+import { getEmails, syncEmails, sendReplyEmail } from '../../services/emailService';
 
 export const Dashboard = () => {
     const [emails, setEmails] = useState<EmailItem[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [syncing, setSyncing] = useState<boolean>(false);
+
+    // State quản lý ID của email đang được gửi phản hồi
+    const [sendingId, setSendingId] = useState<string | null>(null);
 
     // Hàm tải danh sách Email từ Backend
     const fetchEmails = async () => {
@@ -45,6 +49,40 @@ export const Dashboard = () => {
         }
     };
 
+    // Hàm xử lý nút "Gửi phản hồi"
+    const handleSendReply = async (email: EmailItem) => {
+        if (!email.suggestedReply) {
+            alert('Email này chưa có gợi ý phản hồi từ AI!');
+            return;
+        }
+
+        console.log('>>> Tiến hành gửi email phản hồi:', {
+            to: email.sender.email,
+            subject: email.subject,
+            id: email._id
+        });
+
+        try {
+            setSendingId(email._id);
+
+            // Truyền đủ 4 tham số: người nhận, tiêu đề, nội dung, và ID email để update MongoDB
+            await sendReplyEmail(
+                email.sender.email,
+                email.subject,
+                email.suggestedReply,
+                email._id
+            );
+
+            alert(`✅ Đã gửi email phản hồi thành công tới ${email.sender.email}!`);
+            await fetchEmails(); // Cập nhật lại danh sách và trạng thái trong MongoDB
+        } catch (error: any) {
+            console.error('Lỗi khi gửi phản hồi:', error);
+            alert(`❌ Lỗi gửi email: ${error.response?.data?.message || error.message || 'Vui lòng kiểm tra lại EMAIL_USER / EMAIL_PASS trong file backend/.env!'}`);
+        } finally {
+            setSendingId(null);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
             {/* Header */}
@@ -61,7 +99,7 @@ export const Dashboard = () => {
                 <button
                     onClick={handleSync}
                     disabled={syncing}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition cursor-pointer"
                 >
                     <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
                     {syncing ? 'Đang đồng bộ...' : 'Đồng bộ Email'}
@@ -108,6 +146,12 @@ export const Dashboard = () => {
                                             <ShieldAlert size={14} /> CẢNH BÁO LỪA ĐẢO
                                         </span>
                                     )}
+
+                                    {email.isAutoReplied && (
+                                        <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                            <CheckCircle size={13} /> Đã phản hồi
+                                        </span>
+                                    )}
                                 </div>
 
                                 <span className="text-xs text-slate-400">
@@ -140,8 +184,25 @@ export const Dashboard = () => {
                                     <p className="text-xs text-indigo-200">
                                         <strong className="text-indigo-400">Gợi ý trả lời:</strong> "{email.suggestedReply}"
                                     </p>
-                                    <button className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition shrink-0">
-                                        <Send size={13} /> Gửi phản hồi
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSendReply(email)}
+                                        disabled={sendingId === email._id || email.isAutoReplied}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition shrink-0 cursor-pointer"
+                                    >
+                                        {sendingId === email._id ? (
+                                            <>
+                                                <Loader2 size={13} className="animate-spin" /> Đang gửi...
+                                            </>
+                                        ) : email.isAutoReplied ? (
+                                            <>
+                                                <CheckCircle size={13} /> Đã gửi
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Send size={13} /> Gửi phản hồi
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             )}
