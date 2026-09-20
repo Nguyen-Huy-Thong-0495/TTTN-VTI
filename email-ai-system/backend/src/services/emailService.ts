@@ -1,6 +1,4 @@
 import nodemailer from 'nodemailer';
-
-// Cấu hình transporter gửi mail qua Gmail SMTP
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -11,15 +9,21 @@ const transporter = nodemailer.createTransport({
 
 export const sendReplyEmail = async (to: string, subject: string, text: string) => {
     try {
+        // Kiểm tra để tránh trùng lặp "Re: Re: ..."
+        const cleanSubject = subject || '';
+        const formattedSubject = cleanSubject.startsWith('Re:') 
+            ? cleanSubject 
+            : `Re: ${cleanSubject}`;
+
         const mailOptions = {
             from: `"AI Email Smart Agent" <${process.env.EMAIL_USER}>`,
             to,
-            subject: `Re: ${subject}`,
+            subject: formattedSubject,
             text,
         };
 
         const info = await transporter.sendMail(mailOptions);
-        console.log('Email đã được gửi thành công:', info.messageId);
+        console.log('✅ Email đã được gửi thành công:', info.messageId);
         return { success: true, messageId: info.messageId };
     } catch (error) {
         console.error('Lỗi khi gửi email:', error);

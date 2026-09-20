@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { getEmails, syncEmails, sendReply } from '../controllers/emailController';
+import { verifyToken } from '../middleware/authMiddleware';
 
 const router = Router();
 
+
+router.use(verifyToken);
 router.get('/', getEmails);
 router.post('/sync', syncEmails);
 router.post('/send-reply', sendReply);
