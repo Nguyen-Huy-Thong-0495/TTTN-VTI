@@ -58,27 +58,29 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
         }
     });
 
-    // Helper ép kiểu dữ liệu mảng an toàn
+    // Helper ép kiểu dữ liệu mảng an toàn từ nhiều định dạng Backend trả về
     const extractEmailList = (data: any): EmailItem[] => {
+        if (!data) return [];
         if (Array.isArray(data)) return data;
-        if (data && Array.isArray(data.emails)) return data.emails;
-        if (data && Array.isArray(data.data)) return data.data;
+        if (Array.isArray(data.emails)) return data.emails;
+        if (Array.isArray(data.data)) return data.data;
+        if (data.data && Array.isArray(data.data.emails)) return data.data.emails;
+        if (Array.isArray(data.items)) return data.items;
+        if (Array.isArray(data.result)) return data.result;
         return [];
     };
 
-    // Tải dữ liệu ban đầu từ Database
+    // Tải dữ liệu từ Database
     const fetchEmailsFromDB = useCallback(async (isInitial = false) => {
         try {
             if (isInitial) setLoading(true);
             const rawData = await getEmails();
             if (isMounted.current) {
-                setEmails(extractEmailList(rawData));
+                const list = extractEmailList(rawData);
+                setEmails(list);
             }
         } catch (error) {
             console.error('Lỗi khi tải danh sách email:', error);
-            if (isMounted.current) {
-                setEmails([]);
-            }
         } finally {
             if (isInitial && isMounted.current) {
                 setLoading(false);
@@ -95,13 +97,24 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
         }
 
         try {
-            const updatedData = await syncEmails();
+            const syncResult = await syncEmails();
+            const extracted = extractEmailList(syncResult);
+
+            if (extracted.length > 0) {
+                // Nếu API sync trả về trực tiếp mảng danh sách email
+                if (isMounted.current) setEmails(extracted);
+            } else {
+                // Nếu API sync chỉ trả về status/message (không chứa mảng email),
+                // ta chủ động fetch lại dữ liệu từ DB để lấy email đã đồng bộ
+                await fetchEmailsFromDB(false);
+            }
+
             if (isMounted.current) {
-                setEmails(extractEmailList(updatedData));
                 setLastSyncedAt(new Date());
             }
         } catch (error) {
             console.error('Lỗi khi đồng bộ email:', error);
+            // Khi sync lỗi vẫn gọi lại DB để không làm trống giao diện
             if (isMounted.current) {
                 await fetchEmailsFromDB(false);
             }
@@ -157,7 +170,9 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
     const handleSaveEditing = (emailId: string) => {
         setEmails((prev) =>
             prev.map((item) =>
-                item._id === emailId ? { ...item, suggestedReply: editedReplyText } : item
+                (item._id === emailId || item.id === emailId)
+                    ? { ...item, suggestedReply: editedReplyText }
+                    : item
             )
         );
         setEditingReplyId(null);
@@ -165,24 +180,27 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
 
     // Xử lý Phản hồi Email
     const handleSendReply = async (email: EmailItem) => {
-        const replyText = editingReplyId === email._id ? editedReplyText : email.suggestedReply;
+        const targetId = email._id || email.id || '';
+        const replyText = editingReplyId === targetId ? editedReplyText : email.suggestedReply;
 
         if (!replyText || !replyText.trim()) {
             alert('Nội dung phản hồi không được để trống!');
             return;
         }
 
+        const senderEmail = typeof email.sender === 'string' ? email.sender : email.sender?.email || '';
+
         try {
-            setSendingId(email._id);
+            setSendingId(targetId);
 
             await sendReplyEmail({
-                to: email.sender?.email || '',
+                to: senderEmail,
                 subject: email.subject,
                 replyContent: replyText,
-                emailId: email._id,
+                emailId: targetId,
             });
 
-            alert(`Đã gửi email phản hồi thành công tới ${email.sender?.email}!`);
+            alert(`Đã gửi email phản hồi thành công tới ${senderEmail}!`);
             setEditingReplyId(null);
             await fetchEmailsFromDB(false);
         } catch (error: any) {
@@ -214,10 +232,13 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
     const filteredEmails = useMemo(() => {
         const safeList = Array.isArray(emails) ? emails : [];
         return safeList.filter((email) => {
+            const senderName = typeof email.sender === 'object' ? email.sender?.name || '' : '';
+            const senderEmail = typeof email.sender === 'object' ? email.sender?.email || '' : (email.sender || '');
+
             const matchesSearch =
                 (email.subject || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (email.sender?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                (email.sender?.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                senderName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                senderEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (email.aiSummary || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                 (email.bodyText || '').toLowerCase().includes(searchQuery.toLowerCase());
 
@@ -410,7 +431,7 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                             <button
                                 type="button"
                                 onClick={() => setActiveFilter('all')}
-                                className="text-indigo-400 hover:underline text-xs"
+                                className="text-indigo-400 hover:underline text-xs cursor-pointer"
                             >
                                 (Bỏ lọc)
                             </button>
@@ -439,12 +460,16 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                     </div>
                 ) : (
                     filteredEmails.map((email) => {
-                        const isExpanded = expandedEmailId === email._id;
-                        const isEditing = editingReplyId === email._id;
+                        const emailId = email._id || email.id || '';
+                        const isExpanded = expandedEmailId === emailId;
+                        const isEditing = editingReplyId === emailId;
+
+                        const senderName = typeof email.sender === 'object' ? email.sender?.name : 'Không rõ';
+                        const senderEmail = typeof email.sender === 'object' ? email.sender?.email : (email.sender || 'N/A');
 
                         return (
                             <div
-                                key={email._id}
+                                key={emailId}
                                 className={`p-5 rounded-2xl border transition-all duration-200 ${
                                     email.isPhishing
                                         ? 'bg-red-950/20 border-red-800/50 hover:border-red-700'
@@ -493,9 +518,9 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                         <button
                                             type="button"
                                             onClick={() =>
-                                                setExpandedEmailId(isExpanded ? null : email._id)
+                                                setExpandedEmailId(isExpanded ? null : emailId)
                                             }
-                                            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 shrink-0 font-medium"
+                                            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 shrink-0 font-medium cursor-pointer"
                                         >
                                             {isExpanded ? (
                                                 <>
@@ -513,9 +538,9 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                 <p className="text-xs text-slate-400 mb-4">
                                     Người gửi:{' '}
                                     <span className="text-slate-300 font-medium">
-                                        {email.sender?.name || 'Không rõ'}
+                                        {senderName}
                                     </span>{' '}
-                                    ({email.sender?.email || 'N/A'})
+                                    ({senderEmail})
                                 </p>
 
                                 {/* Full Email Body Text Expansion */}
@@ -556,11 +581,11 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                                     type="button"
                                                     onClick={() =>
                                                         handleStartEditing(
-                                                            email._id,
+                                                            emailId,
                                                             email.suggestedReply || ''
                                                         )
                                                     }
-                                                    className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 transition"
+                                                    className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 transition cursor-pointer"
                                                 >
                                                     <Edit3 size={12} /> Chỉnh sửa
                                                 </button>
@@ -580,14 +605,14 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                                     <button
                                                         type="button"
                                                         onClick={handleCancelEditing}
-                                                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-md transition flex items-center gap-1"
+                                                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-md transition flex items-center gap-1 cursor-pointer"
                                                     >
                                                         <X size={12} /> Hủy
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleSaveEditing(email._id)}
-                                                        className="px-2.5 py-1 bg-indigo-700 hover:bg-indigo-600 text-white text-xs rounded-md transition flex items-center gap-1"
+                                                        onClick={() => handleSaveEditing(emailId)}
+                                                        className="px-2.5 py-1 bg-indigo-700 hover:bg-indigo-600 text-white text-xs rounded-md transition flex items-center gap-1 cursor-pointer"
                                                     >
                                                         <Check size={12} /> Lưu thay đổi
                                                     </button>
@@ -602,25 +627,24 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                                     type="button"
                                                     onClick={() => handleSendReply(email)}
                                                     disabled={
-                                                        sendingId === email._id || email.isAutoReplied
+                                                        sendingId === emailId || email.isAutoReplied
                                                     }
                                                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition shrink-0 cursor-pointer shadow-sm"
                                                 >
-                                                    {sendingId === email._id ? (
+                                                    {sendingId === emailId ? (
                                                         <>
-                                                            <Loader2
-                                                                size={13}
-                                                                className="animate-spin"
-                                                            />{' '}
+                                                            <Loader2 size={13} className="animate-spin" />
                                                             Đang gửi...
                                                         </>
                                                     ) : email.isAutoReplied ? (
                                                         <>
-                                                            <CheckCircle size={13} /> Đã gửi
+                                                            <CheckCircle size={13} />
+                                                            Đã gửi
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <Send size={13} /> Gửi phản hồi
+                                                            <Send size={13} />
+                                                            Gửi phản hồi
                                                         </>
                                                     )}
                                                 </button>

@@ -1,5 +1,6 @@
 export interface EmailItem {
     _id: string;
+    id?: string; // Thêm trường id optional để tránh lỗi ts(2339)
     messageId: string;
     sender: {
         name: string;
