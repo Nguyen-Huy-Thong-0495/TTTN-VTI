@@ -114,7 +114,7 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Gửi email phản hồi & Cập nhật trạng thái trong Database
+ * Gửi email phản hồi, Kiểm tra & Cập nhật Token, Cập nhật trạng thái trong Database
  */
 export const sendReply = async (req: AuthRequest, res: Response) => {
     try {
@@ -129,15 +129,28 @@ export const sendReply = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'Thiếu địa chỉ người nhận (to) hoặc nội dung (replyContent).' });
         }
 
-        const userExists = await User.exists({ _id: userId });
-        if (!userExists) {
+        // 1. Kiểm tra sự tồn tại và hạn mức Token của người dùng
+        const user = await User.findById(userId);
+        if (!user) {
             return res.status(404).json({ message: 'Tài khoản người dùng không tồn tại trong hệ thống.' });
         }
 
-        // Gửi email qua helper service
+        if (user.tokensUsed >= user.tokenLimit) {
+            return res.status(403).json({
+                message: `Bạn đã sử dụng hết hạn mức Token (${user.tokensUsed}/${user.tokenLimit}). Vui lòng liên hệ Admin để nâng hạn mức!`
+            });
+        }
+
+        // 2. Gửi email qua helper service
         await sendReplyEmail(to, subject, replyContent);
 
-        // Cập nhật trạng thái trong DB
+        // 3. Tính toán và cộng dồn Token tiêu tốn (ví dụ: dựa trên độ dài nội dung phản hồi)
+        const estimatedTokens = Math.max(50, Math.ceil(replyContent.length / 4));
+        await User.findByIdAndUpdate(userId, {
+            $inc: { tokensUsed: estimatedTokens }
+        });
+
+        // 4. Cập nhật trạng thái trong DB
         if (emailId) {
             await Email.findOneAndUpdate(
                 { _id: emailId },
@@ -151,7 +164,11 @@ export const sendReply = async (req: AuthRequest, res: Response) => {
             );
         }
 
-        return res.status(200).json({ message: 'Gửi email phản hồi thành công!' });
+        return res.status(200).json({
+            message: 'Gửi email phản hồi thành công!',
+            tokensConsumed: estimatedTokens,
+            totalTokensUsed: user.tokensUsed + estimatedTokens
+        });
     } catch (error: any) {
         console.error('Lỗi khi gửi email phản hồi:', error);
         return res.status(500).json({

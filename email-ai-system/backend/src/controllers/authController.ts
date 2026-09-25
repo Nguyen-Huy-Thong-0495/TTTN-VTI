@@ -23,16 +23,16 @@ export const register = async (req: Request, res: Response) => {
     // Mã hóa mật khẩu
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Tạo User mới
+    // Tạo User mới (role, tokenLimit, tokensUsed lấy giá trị mặc định từ Model)
     const newUser = await User.create({
       name,
       email,
       password: hashedPassword,
     });
 
-    // Tạo JWT Token
+    // Tạo JWT Token (bổ sung role vào payload)
     const token = jwt.sign(
-      { id: newUser._id },
+      { id: newUser._id, role: newUser.role },
       process.env.JWT_SECRET || 'your_jwt_secret',
       { expiresIn: '7d' }
     );
@@ -40,7 +40,14 @@ export const register = async (req: Request, res: Response) => {
     res.status(201).json({
       message: 'Đăng ký thành công!',
       token,
-      user: { id: newUser._id, name: newUser.name, email: newUser.email },
+      user: { 
+        id: newUser._id, 
+        name: newUser.name, 
+        email: newUser.email,
+        role: newUser.role,
+        tokenLimit: newUser.tokenLimit,
+        tokensUsed: newUser.tokensUsed
+      },
     });
   } catch (error) {
     res.status(500).json({ message: 'Lỗi máy chủ khi đăng ký', error });
@@ -70,9 +77,9 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Email hoặc mật khẩu không chính xác.' });
     }
 
-    // Tạo JWT Token
+    // Tạo JWT Token (bổ sung role vào payload)
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role },
       process.env.JWT_SECRET || 'your_jwt_secret',
       { expiresIn: '7d' }
     );
@@ -80,7 +87,14 @@ export const login = async (req: Request, res: Response) => {
     res.status(200).json({
       message: 'Đăng nhập thành công!',
       token,
-      user: { id: user._id, name: user.name, email: user.email },
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        email: user.email,
+        role: user.role,
+        tokenLimit: user.tokenLimit,
+        tokensUsed: user.tokensUsed
+      },
     });
   } catch (error) {
     res.status(500).json({ message: 'Lỗi máy chủ khi đăng nhập', error });

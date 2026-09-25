@@ -16,12 +16,16 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": [
+      "vite/client"
+    ],
     /* Linting */
     "strict": true,
     "noUnusedLocals": false,
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "src"
+    "src",
+    "src/**/*.d.ts"
   ]
 }
