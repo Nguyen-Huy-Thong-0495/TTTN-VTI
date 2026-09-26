@@ -7,6 +7,12 @@ export interface IUser extends Document {
   role: 'admin' | 'user';
   tokenLimit: number;
   tokensUsed: number;
+  // Cấu hình kết nối Email riêng cho từng User (Sử dụng App Password)
+  emailConfig?: {
+    emailAddress?: string;
+    appPassword?: string;
+    isConnected?: boolean;
+  };
   googleTokens?: {
     accessToken?: string;
     refreshToken?: string;
@@ -31,6 +37,12 @@ const UserSchema = new Schema<IUser>({
   tokensUsed: { 
     type: Number, 
     default: 0 // Số token đã sử dụng
+  },
+  // Lưu thông tin kết nối Gmail riêng của User
+  emailConfig: {
+    emailAddress: { type: String, default: '' },
+    appPassword: { type: String, default: '' },
+    isConnected: { type: Boolean, default: false }
   },
   googleTokens: {
     accessToken: { type: String },

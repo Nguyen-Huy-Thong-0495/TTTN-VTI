@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Login } from './components/Login';
+import Login from './components/Login'; 
 import { Dashboard } from './pages/dashboard/Dashboard';
-import { AdminDashboard } from './pages/dashboard/AdminDashboard'; // Thêm import AdminDashboard
+import { AdminDashboard } from './pages/dashboard/AdminDashboard';
 
 export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -40,7 +40,7 @@ export const App: React.FC = () => {
   };
 
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={() => checkAuth()} />;
+    return <Login />; // ✅ Đã loại bỏ prop onLoginSuccess vì dùng Google OAuth redirect trực tiếp
   }
 
   return (

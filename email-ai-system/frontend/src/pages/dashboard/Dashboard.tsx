@@ -101,11 +101,8 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
             const extracted = extractEmailList(syncResult);
 
             if (extracted.length > 0) {
-                // Nếu API sync trả về trực tiếp mảng danh sách email
                 if (isMounted.current) setEmails(extracted);
             } else {
-                // Nếu API sync chỉ trả về status/message (không chứa mảng email),
-                // ta chủ động fetch lại dữ liệu từ DB để lấy email đã đồng bộ
                 await fetchEmailsFromDB(false);
             }
 
@@ -114,7 +111,6 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
             }
         } catch (error) {
             console.error('Lỗi khi đồng bộ email:', error);
-            // Khi sync lỗi vẫn gọi lại DB để không làm trống giao diện
             if (isMounted.current) {
                 await fetchEmailsFromDB(false);
             }
@@ -463,6 +459,7 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                         const emailId = email._id || email.id || '';
                         const isExpanded = expandedEmailId === emailId;
                         const isEditing = editingReplyId === emailId;
+                        const isSending = sendingId === emailId;
 
                         const senderName = typeof email.sender === 'object' ? email.sender?.name : 'Không rõ';
                         const senderEmail = typeof email.sender === 'object' ? email.sender?.email : (email.sender || 'N/A');
@@ -626,25 +623,16 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleSendReply(email)}
-                                                    disabled={
-                                                        sendingId === emailId || email.isAutoReplied
-                                                    }
-                                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition shrink-0 cursor-pointer shadow-sm"
+                                                    disabled={isSending}
+                                                    className="shrink-0 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                                                 >
-                                                    {sendingId === emailId ? (
+                                                    {isSending ? (
                                                         <>
-                                                            <Loader2 size={13} className="animate-spin" />
-                                                            Đang gửi...
-                                                        </>
-                                                    ) : email.isAutoReplied ? (
-                                                        <>
-                                                            <CheckCircle size={13} />
-                                                            Đã gửi
+                                                            <Loader2 size={13} className="animate-spin" /> Đang gửi...
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <Send size={13} />
-                                                            Gửi phản hồi
+                                                            <Send size={12} /> {email.isAutoReplied ? 'Gửi lại' : 'Gửi phản hồi'}
                                                         </>
                                                     )}
                                                 </button>

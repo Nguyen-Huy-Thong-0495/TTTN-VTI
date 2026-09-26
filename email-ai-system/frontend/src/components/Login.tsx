@@ -1,123 +1,87 @@
-import React, { useState } from 'react';
-import { api } from '../services/api';
+import React, { useEffect } from 'react';
 
-interface LoginProps {
-  onLoginSuccess: () => void;
-}
+const Login: React.FC = () => {
+    // Tự động bắt token từ URL khi Google Redirect về
+    useEffect(() => {
+        const queryParams = new URLSearchParams(window.location.search);
+        const token = queryParams.get('token');
+        const userStr = queryParams.get('user'); // Nếu backend có truyền kèm thông tin user
 
-export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  const [isRegister, setIsRegister] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+        if (token) {
+            localStorage.setItem('token', token);
+            if (userStr) {
+                localStorage.setItem('user', userStr);
+            }
+            // Load lại trang hoặc chuyển hướng để App.tsx nhận diện đã đăng nhập
+            window.location.href = '/';
+        }
+    }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
+    // Hàm xử lý khi bấm nút Đăng nhập với Google
+    const handleGoogleLogin = () => {
+        window.location.href = 'http://localhost:3000/api/auth/google';
+    };
 
-    try {
-      const endpoint = isRegister ? '/auth/register' : '/auth/login';
-      const payload = isRegister ? { name, email, password } : { email, password };
+    return (
+        <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100vh',
+            backgroundColor: '#0f172a',
+            fontFamily: 'sans-serif'
+        }}>
+            <div style={{
+                backgroundColor: '#1e293b',
+                padding: '40px',
+                borderRadius: '12px',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+                width: '100%',
+                maxWidth: '400px',
+                textAlign: 'center'
+            }}>
+                <div style={{ marginBottom: '24px' }}>
+                    <h2 style={{ color: '#f8fafc', marginBottom: '8px', fontSize: '24px' }}>
+                        AI Email Smart Agent
+                    </h2>
+                    <p style={{ color: '#94a3b8', fontSize: '14px' }}>
+                        Đăng nhập để quản lý và phân loại hòm thư thông minh
+                    </p>
+                </div>
 
-      const response = await api.post(endpoint, payload);
-
-      // Lưu Token và thông tin User vào localStorage
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-
-      onLoginSuccess();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Đã có lỗi xảy ra. Vui lòng thử lại.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600/20 text-indigo-400 mb-3 border border-indigo-500/30">
-            ✉️
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            AI Email Smart Agent
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            {isRegister ? 'Tạo tài khoản mới' : 'Đăng nhập để quản lý hòm thư'}
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isRegister && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Họ và tên</label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-sm"
-                placeholder="Nguyễn Văn A"
-              />
+                <button
+                    onClick={handleGoogleLogin}
+                    style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '12px',
+                        backgroundColor: '#ffffff',
+                        color: '#1e293b',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '12px 16px',
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.2s',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                    onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#f1f5f9')}
+                    onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#ffffff')}
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.95H1.19v3.14C3.17 21.36 7.23 24 12 24z"/>
+                        <path fill="#FBBC05" d="M5.28 14.25c-.25-.72-.38-1.49-.38-2.25s.13-1.53.38-2.25V6.61H1.19C.43 8.13 0 9.87 0 12s.43 3.87 1.19 5.39l4.09-3.14z"/>
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.23 0 3.17 2.64 1.19 6.61l4.09 3.14c.95-2.84 3.6-4.95 6.72-4.95z"/>
+                    </svg>
+                    Đăng nhập với Google
+                </button>
             </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Email</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-sm"
-              placeholder="user@example.com"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Mật khẩu</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-sm"
-              placeholder="••••••••"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium text-sm transition-colors text-white disabled:opacity-50 mt-2"
-          >
-            {loading ? 'Đang xử lý...' : isRegister ? 'Tạo tài khoản' : 'Đăng nhập'}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center text-xs text-slate-400">
-          {isRegister ? 'Đã có tài khoản?' : 'Chưa có tài khoản?'}{' '}
-          <button
-            onClick={() => {
-              setIsRegister(!isRegister);
-              setError('');
-            }}
-            className="text-indigo-400 hover:underline font-medium ml-1"
-          >
-            {isRegister ? 'Đăng nhập' : 'Đăng ký ngay'}
-          </button>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
+
+export default Login;
