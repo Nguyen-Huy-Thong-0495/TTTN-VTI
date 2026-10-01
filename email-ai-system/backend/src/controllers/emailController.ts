@@ -100,7 +100,7 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
         }
 
         const hasGoogleToken = user.googleTokens && user.googleTokens.accessToken;
-        const hasAppPassword = user.emailConfig?.isConnected && user.emailConfig?.emailAddress && user.emailConfig?.appPassword;
+        const hasAppPassword = (user.emailConfig?.isConnected && user.emailConfig?.emailAddress && user.emailConfig?.appPassword) || process.env.EMAIL_USER;
 
         if (!hasGoogleToken && !hasAppPassword) {
             const userEmails = await Email.find({ userId }).sort({ receivedAt: -1 }).lean();
@@ -120,9 +120,13 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
         if (hasGoogleToken) {
             console.log(`>>> [Sync Engine] Đang gọi Gmail API cho User ID [${userId}]...`);
             realEmails = await fetchEmailsFromGmailApi(user.googleTokens!.accessToken!);
-        } else if (hasAppPassword) {
-            console.log(`>>> [Sync Engine] Đang kết nối IMAP kéo email cho Hòm thư [${user.emailConfig?.emailAddress}]...`);
-            realEmails = await fetchRealEmailsFromIMAP(user.emailConfig!.emailAddress!, user.emailConfig!.appPassword!);
+        } else {
+            const syncEmailAddress = user.emailConfig?.emailAddress || process.env.EMAIL_USER;
+            const syncAppPassword = user.emailConfig?.appPassword || process.env.EMAIL_PASS;
+            if (syncEmailAddress && syncAppPassword) {
+                console.log(`>>> [Sync Engine] Đang kết nối IMAP kéo email cho Hòm thư [${syncEmailAddress}]...`);
+                realEmails = await fetchRealEmailsFromIMAP(syncEmailAddress, syncAppPassword);
+            }
         }
 
         // Duyệt qua từng email thực tế và lưu vào MongoDB
@@ -234,8 +238,11 @@ export const sendReply = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        const emailConfig = user.emailConfig;
-        if (!emailConfig || !emailConfig.isConnected || !emailConfig.emailAddress || !emailConfig.appPassword) {
+        // Lấy cấu hình email từ Database hoặc tự động fallback sang file .env trên VPS
+        const senderEmail = user.emailConfig?.emailAddress || process.env.EMAIL_USER;
+        const senderPassword = user.emailConfig?.appPassword || process.env.EMAIL_PASS;
+
+        if (!senderEmail || !senderPassword) {
             return res.status(400).json({
                 message: 'Vui lòng kết nối và cấu hình Email/App Password trong phần Cài đặt trước khi gửi mail.'
             });
@@ -245,8 +252,8 @@ export const sendReply = async (req: AuthRequest, res: Response) => {
             to,
             subject,
             replyContent,
-            emailConfig.emailAddress,
-            emailConfig.appPassword,
+            senderEmail,
+            senderPassword,
             user.name || 'AI Smart Agent'
         );
 
