@@ -25,7 +25,7 @@ export interface IEmail extends Document {
     updatedAt?: Date;
 }
 
-// Mongoose 
+// Mongoose Schema
 const EmailSchema = new Schema<IEmail>(
     {
         messageId: {
@@ -36,11 +36,11 @@ const EmailSchema = new Schema<IEmail>(
             index: true 
         },
         sender: {
-            name: { type: String, required: true, trim: true },
-            email: { type: String, required: true, trim: true, lowercase: true }
+            name: { type: String, required: true, default: 'Unknown', trim: true },
+            email: { type: String, required: true, default: 'unknown@domain.com', trim: true, lowercase: true }
         },
-        subject: { type: String, required: true, trim: true },
-        bodyText: { type: String, required: true },
+        subject: { type: String, required: true, default: '(Không có tiêu đề)', trim: true },
+        bodyText: { type: String, required: true, default: '' },
         receivedAt: { type: Date, default: Date.now },
         aiCategory: { type: String, default: 'Unclassified', trim: true },
         isPhishing: { type: Boolean, default: false },
@@ -54,7 +54,7 @@ const EmailSchema = new Schema<IEmail>(
         },
         priorityReason: { type: String, trim: true },
         aiSummary: { type: String, default: '', trim: true },
-        suggestedReply: { type: String, trim: true },
+        suggestedReply: { type: String, default: '', trim: true },
         status: {
             type: String,
             enum: ['Pending', 'Resolved', 'SpamTrash'],
@@ -75,8 +75,7 @@ const EmailSchema = new Schema<IEmail>(
     }
 );
 
-// Tối ưu Đánh chỉ mục kép 
-// Giúp câu lệnh truy vấn email theo User và sắp xếp thời gian mới nhất chạy mượt hơn khi Polling
+// Tối ưu Đánh chỉ mục kép (Compound Indexes)
 EmailSchema.index({ userId: 1, receivedAt: -1 });
 EmailSchema.index({ userId: 1, status: 1 });
 

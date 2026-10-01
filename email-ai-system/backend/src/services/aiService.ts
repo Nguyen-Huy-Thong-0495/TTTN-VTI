@@ -1,118 +1,107 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-    console.warn('⚠️ GEMINI_API_KEY chưa được cấu hình trong file .env!');
-}
+const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+});
 
-const genAI = new GoogleGenerativeAI(apiKey || '');
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
-// TypeScript Interface cho kết quả phân tích
-export interface AIAnalysisResult {
-    aiCategory: string;
-    isPhishing: boolean;
-    phishingReason?: string;
-    isSpamOrPromo: boolean;
-    priorityScore: number;
-    priorityReason?: string;
-    aiSummary: string;
-    suggestedReply?: string;
-}
+export const analyzeEmailWithAI = async (subject: any, bodyText: any, senderEmail: any) => {
+    const MAX_RETRIES = 3;
 
-/**
- * Phân tích nội dung Email sử dụng Gemini 1.5 Flash
- */
-export const analyzeEmailWithAI = async (
-    subject: string,
-    bodyText: string,
-    senderEmail: string
-): Promise<AIAnalysisResult> => {
-    // Kiểm tra API Key
-    if (!process.env.GEMINI_API_KEY) {
-        console.error('Lỗi: Cấu hình thiếu GEMINI_API_KEY.');
-        return getFallbackResult(bodyText, 'Thiếu GEMINI_API_KEY trong .env');
-    }
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            console.log(`[AI Service] Đang phân tích email... (lần thử ${attempt}/${MAX_RETRIES})`);
 
-    try {
-        // Tận dụng tính năng systemInstruction và temperature của Gemini 1.5
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-1.5-flash',
-            systemInstruction: `Bạn là trợ lý AI chuyên nghiệp phân tích và xử lý Email.
-Nhiệm vụ của bạn là phân tích thông tin email được cung cấp và trả về DUY NHẤT một chuỗi JSON hợp lệ theo đúng schema được yêu cầu. Tuyệt đối không thêm bất kỳ đoạn văn bản giải thích nào ngoài JSON.`,
-            generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.2, // Nhiệt độ thấp giúp phản hồi ổn định và chính xác hơn
-            },
-        });
+            const prompt = `
+Bạn là hệ thống AI phân loại email thông minh.
+Hãy phân tích thông tin email sau và CHỈ trả về một đối tượng JSON thuần túy hợp lệ, không bọc trong markdown (như \`\`\`json).
 
-        const prompt = `
-Hãy phân tích Email dưới đây:
-
-[Thông tin Email]
+Thông tin email:
 - Người gửi: ${senderEmail || 'Không rõ'}
 - Tiêu đề: ${subject || 'Không có tiêu đề'}
-- Nội dung: ${bodyText || 'Nội dung rỗng'}
+- Nội dung: ${bodyText || 'Không có nội dung'}
 
-[Yêu cầu định dạng JSON đầu ra]
+Cấu trúc JSON bắt buộc:
 {
-  "aiCategory": "Tên phân loại (ví dụ: Work, Sales/Lead, Support, Phishing, General)",
-  "isPhishing": true/false (chỉ bằng true nếu phát hiện dấu hiệu lừa đảo, mạo danh ngân hàng/tổ chức, đính kèm link/file độc hại),
-  "phishingReason": "Giải thích ngắn gọn lý do bằng tiếng Việt nếu isPhishing = true, ngược lại để null",
-  "isSpamOrPromo": true/false (true nếu là quảng cáo, email rác),
-  "priorityScore": Số nguyên từ 1 đến 10 (10 là cực kỳ khẩn cấp hoặc nguy hiểm),
-  "priorityReason": "Lý do đánh giá điểm ưu tiên bằng tiếng Việt",
-  "aiSummary": "Tóm tắt nội dung email trong 1-2 câu tiếng Việt ngắn gọn",
-  "suggestedReply": "Gợi ý câu trả lời tiếng Việt ngắn gọn lịch sự nếu email cần phản hồi, ngược lại để null"
+    "aiCategory": "Work",
+    "priorityScore": 5,
+    "isPhishing": false,
+    "isSpamOrPromo": false,
+    "aiSummary": "Tóm tắt ngắn gọn nội dung email trong 1-2 câu",
+    "suggestedReply": "Đề xuất câu trả lời lịch sự, chi tiết cho email này"
 }
+
+Quy tắc:
+- aiCategory chỉ được phép chọn MỘT trong các giá trị: "Work", "Sales/Lead", "Support", "Phishing", "General".
+- priorityScore là số nguyên từ 1 đến 10 (trong đó các email quan trọng/lừa đảo để từ 8-10, bình thường để 5).
+- isPhishing: true nếu có dấu hiệu lừa đảo giả mạo, ngược lại false.
+- isSpamOrPromo: true nếu là quảng cáo/spam, ngược lại false.
+- suggestedReply: Phải có nội dung gợi ý trả lời chuyên nghiệp (trừ khi là lừa đảo/quảng cáo rác thì để trống).
 `;
 
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text().trim();
+            const response = await ai.models.generateContent({
+                model: 'gemini-1.5-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    temperature: 0.1
+                }
+            });
 
-        // Xử lý làm sạch chuỗi JSON phòng trường hợp AI tự động thêm bọc ```json ... ```
-        const cleanJson = responseText
-            .replace(/^```json\s*/i, '')
-            .replace(/^```\s*/i, '')
-            .replace(/\s*```$/i, '')
-            .trim();
+            const responseText = response.text?.trim();
+            if (!responseText) {
+                throw new Error('Gemini trả về dữ liệu rỗng.');
+            }
 
-        const parsedData = JSON.parse(cleanJson) as AIAnalysisResult;
+            const cleanJson = responseText
+                .replace(/```json\s*/gi, '')
+                .replace(/```\s*/gi, '')
+                .trim();
 
-        // Chuẩn hóa và ràng buộc dữ liệu đầu ra an toàn
-        return {
-            aiCategory: parsedData.aiCategory || 'General',
-            isPhishing: Boolean(parsedData.isPhishing),
-            phishingReason: parsedData.phishingReason || undefined,
-            isSpamOrPromo: Boolean(parsedData.isSpamOrPromo),
-            priorityScore: typeof parsedData.priorityScore === 'number'
-                ? Math.min(Math.max(parsedData.priorityScore, 1), 10) // Ràng buộc trong đoạn [1, 10]
-                : 5,
-            priorityReason: parsedData.priorityReason || 'Đã phân tích tự động bởi AI',
-            aiSummary: parsedData.aiSummary || (bodyText ? bodyText.slice(0, 100) + '...' : 'Không có tóm tắt'),
-            suggestedReply: parsedData.suggestedReply || undefined,
-        };
+            const result = JSON.parse(cleanJson);
 
-    } catch (error: any) {
-        console.error('Lỗi khi gọi Gemini AI:', error?.message || error);
-        return getFallbackResult(bodyText, 'Chưa phân tích được do lỗi AI service');
+            return {
+                aiCategory: ['Work', 'Sales/Lead', 'Support', 'Phishing', 'General'].includes(result.aiCategory) 
+                    ? result.aiCategory 
+                    : 'General',
+                priorityScore: typeof result.priorityScore === 'number' 
+                    ? Math.min(Math.max(result.priorityScore, 1), 10) 
+                    : 5,
+                isPhishing: Boolean(result.isPhishing),
+                isSpamOrPromo: Boolean(result.isSpamOrPromo),
+                aiSummary: result.aiSummary || (bodyText ? bodyText.slice(0, 100) + '...' : 'Không có tóm tắt'),
+                suggestedReply: result.suggestedReply || 'Cảm ơn bạn đã gửi email. Tôi đã nhận được thông tin và sẽ phản hồi sớm.'
+            };
+
+        } catch (err: any) {
+            const error = err as any;
+            const status = error?.status;
+            console.error(`[AI Service] Lần thử ${attempt} thất bại:`, error?.message || error);
+
+            const message = String(error?.message || '').toLowerCase();
+            const isNetworkError = message.includes('fetch failed') || message.includes('network') || message.includes('timeout');
+            const isTemporaryServerError = [408, 429, 500, 502, 503, 504].includes(status);
+
+            if ((isNetworkError || isTemporaryServerError) && attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt - 1) * 1000;
+                console.log(`[AI Service] Thử lại sau ${delay / 1000}s...`);
+                await sleep(delay);
+                continue;
+            }
+            break;
+        }
     }
-};
 
-/**
- * Hàm trả về kết quả dự phòng (Fallback) khi xảy ra lỗi
- */
-const getFallbackResult = (bodyText: string, reason: string): AIAnalysisResult => {
-    const safeBody = bodyText || '';
     return {
-        aiCategory: 'Unclassified',
+        aiCategory: 'General',
+        priorityScore: 5,
         isPhishing: false,
         isSpamOrPromo: false,
-        priorityScore: 5,
-        priorityReason: reason,
-        aiSummary: safeBody ? safeBody.slice(0, 100) + '...' : 'Không có nội dung',
-        suggestedReply: undefined,
+        aiSummary: bodyText ? bodyText.slice(0, 100) + '...' : 'Không có nội dung',
+        suggestedReply: 'Cảm ơn bạn đã liên hệ.'
     };
 };

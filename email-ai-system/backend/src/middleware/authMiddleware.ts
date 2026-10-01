@@ -7,7 +7,7 @@ export interface AuthRequest extends Request {
     id: string;
     role?: string;
   };
-  userId?: string;  // Giữ lại để tương thích nếu các controller cũ đang dùng
+  userId?: string; 
   userRole?: string;
 }
 

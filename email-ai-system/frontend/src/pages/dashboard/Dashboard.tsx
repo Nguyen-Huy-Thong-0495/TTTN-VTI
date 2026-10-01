@@ -20,7 +20,7 @@ import {
     Check
 } from 'lucide-react';
 import { EmailItem } from '../../types/email';
-import { getEmails, syncEmails, sendReplyEmail } from '../../services/emailService';
+import { getEmails, syncEmails, sendReplyEmail, getQuickRepliesFromAI } from '../../services/emailService';
 
 interface DashboardProps {
     onLogout?: () => void;
@@ -42,9 +42,11 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');
     const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null);
 
-    // Inline Editing for AI Reply
+    // Inline Editing & AI Quick Replies States
     const [editingReplyId, setEditingReplyId] = useState<string | null>(null);
     const [editedReplyText, setEditedReplyText] = useState<string>('');
+    const [loadingAIId, setLoadingAIId] = useState<string | null>(null);
+    const [aiSuggestionsMap, setAiSuggestionsMap] = useState<Record<string, string[]>>({});
 
     const isMounted = useRef<boolean>(true);
 
@@ -172,6 +174,30 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
             )
         );
         setEditingReplyId(null);
+    };
+
+    // Xử lý lấy gợi ý câu trả lời nhanh từ AI thông qua API thật
+    const handleGetQuickReplies = async (email: EmailItem) => {
+        const targetId = email._id || email.id || '';
+        if (!targetId) return;
+
+        try {
+            setLoadingAIId(targetId);
+            const suggestions = await getQuickRepliesFromAI(
+                email.subject || '',
+                email.bodyText || email.aiSummary || '',
+                email.aiCategory
+            );
+            setAiSuggestionsMap((prev) => ({
+                ...prev,
+                [targetId]: Array.isArray(suggestions) ? suggestions : [],
+            }));
+        } catch (error) {
+            console.error("Lỗi lấy gợi ý AI:", error);
+            alert("Không thể tải gợi ý từ AI lúc này. Vui lòng thử lại sau!");
+        } finally {
+            if (isMounted.current) setLoadingAIId(null);
+        }
     };
 
     // Xử lý Phản hồi Email
@@ -460,6 +486,8 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                         const isExpanded = expandedEmailId === emailId;
                         const isEditing = editingReplyId === emailId;
                         const isSending = sendingId === emailId;
+                        const isLoadingAI = loadingAIId === emailId;
+                        const suggestions = aiSuggestionsMap[emailId] || [];
 
                         const senderName = typeof email.sender === 'object' ? email.sender?.name : 'Không rõ';
                         const senderEmail = typeof email.sender === 'object' ? email.sender?.email : (email.sender || 'N/A');
@@ -598,7 +626,43 @@ export const Dashboard = ({ onLogout }: DashboardProps) => {
                                                     className="w-full bg-slate-900 border border-indigo-700/60 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 leading-relaxed"
                                                     placeholder="Nhập nội dung phản hồi mới..."
                                                 />
-                                                <div className="flex items-center justify-end gap-2">
+
+                                                {/* Nút gọi API thật lấy gợi ý nhanh & danh sách câu trả lời mẫu */}
+                                                <div className="mt-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleGetQuickReplies(email)}
+                                                        disabled={isLoadingAI}
+                                                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+                                                    >
+                                                        {isLoadingAI ? (
+                                                            <>
+                                                                <Loader2 size={13} className="animate-spin" /> ✨ Đang tạo gợi ý...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                ✨ Gợi ý câu trả lời AI
+                                                            </>
+                                                        )}
+                                                    </button>
+
+                                                    {suggestions.length > 0 && (
+                                                        <div className="flex flex-col gap-2 mt-2">
+                                                            {suggestions.map((item, index) => (
+                                                                <button
+                                                                    key={index}
+                                                                    type="button"
+                                                                    onClick={() => setEditedReplyText(item)}
+                                                                    className="text-left text-xs bg-slate-900 border border-slate-700 hover:border-amber-400 p-2.5 rounded-lg text-slate-200 transition cursor-pointer"
+                                                                >
+                                                                    💬 {item}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex items-center justify-end gap-2 pt-2">
                                                     <button
                                                         type="button"
                                                         onClick={handleCancelEditing}

@@ -2,40 +2,39 @@ import { Response } from 'express';
 import Email from '../models/Email';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/authMiddleware';
-import { sendReplyEmail } from '../services/emailService';
+import { sendReplyEmail, getQuickRepliesFromAI } from '../services/emailService';
 import { fetchRealEmailsFromIMAP } from '../services/imapService';
 import { fetchEmailsFromGmailApi } from '../services/gmailApiService';
+import { analyzeEmailWithAI } from '../services/aiService';
 
 // Cache mốc thời gian đồng bộ chống spam / overload API
 const lastSyncMap = new Map<string, number>();
 const COOLDOWN_MS = 15000; // Cooldown 15 giây giữa các lần quét thực tế
 
 /**
- * Hàm phân tích rủi ro lừa đảo (Phishing & Scam Detection) cho từng email
+ * Hàm phân tích rủi ro lừa đảo phụ trợ (dùng làm dự phòng khi AI không hoạt động)
  */
 const analyzeEmailSecurity = (subject?: string, snippet?: string, sender?: string): { isPhishing: boolean; securityStatus: 'safe' | 'warning' | 'phishing' } => {
     let riskScore = 0;
-    
-    // Các từ khóa nhạy cảm, cấp bách thường xuất hiện trong email lừa đảo, giả mạo tài khoản
+
     const phishingKeywords = [
-        'urgent', 'verify your account', 'password reset', 'trúng thưởng', 
-        'đăng nhập ngay', 'khóa tài khoản', 'cảnh báo khẩn cấp', 
+        'urgent', 'verify your account', 'password reset', 'trúng thưởng',
+        'đăng nhập ngay', 'khóa tài khoản', 'cảnh báo khẩn cấp',
         'suspended', 'update billing', 'click here immediately', 'xác thực tài khoản'
     ];
-    
+
     const content = `${subject || ''} ${snippet || ''}`.toLowerCase();
-    
+
     phishingKeywords.forEach(keyword => {
         if (content.includes(keyword)) {
             riskScore += 2;
         }
     });
 
-    // Kiểm tra tên miền hoặc định dạng người gửi giả mạo đáng ngờ
     const senderLower = (sender || '').toLowerCase();
     if (
-        senderLower.includes('g00gle') || 
-        senderLower.includes('support-sec') || 
+        senderLower.includes('g00gle') ||
+        senderLower.includes('support-sec') ||
         senderLower.includes('security-update-center') ||
         senderLower.includes('banking-secure-login')
     ) {
@@ -51,7 +50,7 @@ const analyzeEmailSecurity = (subject?: string, snippet?: string, sender?: strin
 };
 
 /**
- * Lấy danh sách Email của người dùng đang đăng nhập
+ * Lấy danh sách Email của người dùng đang đăng nhập (Tôn trọng kết quả chuẩn từ AI/DB)
  */
 export const getEmails = async (req: AuthRequest, res: Response) => {
     try {
@@ -61,18 +60,18 @@ export const getEmails = async (req: AuthRequest, res: Response) => {
             return res.status(401).json({ message: 'Không tìm thấy thông tin xác thực người dùng.' });
         }
 
-        // Chỉ lấy các email thuộc sở hữu của User này
         const rawEmails = await Email.find({ userId })
             .sort({ receivedAt: -1 })
             .lean();
 
-        // Đính kèm trạng thái bảo mật dựa trên nội dung để trả về cho Frontend
         const emails = rawEmails.map((mail: any) => {
-            const analysis = analyzeEmailSecurity(mail.subject, mail.bodyText || mail.aiSummary, typeof mail.sender === 'string' ? mail.sender : mail.sender?.email);
+            const isPhishing = Boolean(mail.isPhishing);
+            const securityStatus = isPhishing ? 'phishing' : (mail.aiCategory === 'Phishing' ? 'phishing' : 'safe');
+
             return {
                 ...mail,
-                securityStatus: analysis.securityStatus,
-                isPhishing: analysis.isPhishing || mail.isPhishing
+                securityStatus,
+                isPhishing
             };
         });
 
@@ -85,7 +84,7 @@ export const getEmails = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Đồng bộ Email THẬT từ Gmail (Hỗ trợ cả Google OAuth Token và IMAP App Password)
+ * Đồng bộ Email THẬT từ Gmail / IMAP (Mapping chuẩn dữ liệu AI vào MongoDB)
  */
 export const syncEmails = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id || req.userId;
@@ -126,29 +125,62 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
             realEmails = await fetchRealEmailsFromIMAP(user.emailConfig!.emailAddress!, user.emailConfig!.appPassword!);
         }
 
-        // Duyệt qua từng email thật và lưu vào MongoDB kèm quét bảo mật
+        // Duyệt qua từng email thực tế và lưu vào MongoDB
         for (const mail of realEmails) {
             const existingEmail = await Email.findOne({ userId, messageId: mail.messageId });
 
             if (!existingEmail) {
-                const senderStr = typeof mail.sender === 'string' ? mail.sender : mail.sender?.email;
+                let senderObj = { name: 'Unknown Sender', email: 'unknown@domain.com' };
+                if (typeof mail.sender === 'object' && mail.sender !== null) {
+                    senderObj = {
+                        name: mail.sender.name || mail.sender.email || 'Unknown',
+                        email: mail.sender.email || 'unknown@domain.com'
+                    };
+                } else if (typeof mail.sender === 'string') {
+                    senderObj = {
+                        name: mail.sender,
+                        email: mail.sender
+                    };
+                }
+
+                const senderStr = senderObj.email;
                 const securityCheck = analyzeEmailSecurity(mail.subject, mail.bodyText, senderStr);
+
+                // Gọi AI phân tích qua aiService.ts
+                let aiAnalysis: any = {};
+                try {
+                    aiAnalysis = await analyzeEmailWithAI(
+                        mail.subject || '',
+                        mail.bodyText || '',
+                        senderStr || ''
+                    );
+                } catch (aiErr) {
+                    console.error('Lỗi khi phân tích AI cho email, dùng giá trị mặc định:', aiErr);
+                    aiAnalysis = {
+                        priorityScore: 5,
+                        aiCategory: 'Unclassified',
+                        isPhishing: securityCheck.isPhishing,
+                        aiSummary: mail.bodyText ? mail.bodyText.substring(0, 150) + '...' : '',
+                        suggestedReply: ''
+                    };
+                }
 
                 await Email.create({
                     userId,
-                    messageId: mail.messageId,
-                    sender: mail.sender,
-                    subject: mail.subject,
-                    bodyText: mail.bodyText,
-                    priorityScore: 5,
-                    aiCategory: 'General',
-                    isPhishing: securityCheck.isPhishing, // Lưu kết quả phát hiện lừa đảo
-                    aiSummary: mail.bodyText ? mail.bodyText.substring(0, 150) + '...' : 'Không có nội dung',
+                    messageId: mail.messageId || `MSG-${Date.now()}-${Math.random()}`,
+                    sender: senderObj,
+                    subject: mail.subject || '(Không có tiêu đề)',
+                    bodyText: mail.bodyText || '',
+                    priorityScore: typeof aiAnalysis.priorityScore === 'number' ? aiAnalysis.priorityScore : 5,
+                    aiCategory: aiAnalysis.aiCategory || 'General',
+                    isPhishing: Boolean(aiAnalysis.isPhishing || securityCheck.isPhishing),
+                    aiSummary: aiAnalysis.aiSummary || '',
+                    suggestedReply: aiAnalysis.suggestedReply || '',
                     status: 'Pending',
                     isAutoReplied: false,
-                    receivedAt: mail.receivedAt,
+                    receivedAt: mail.receivedAt ? new Date(mail.receivedAt) : new Date(),
                 });
-                console.log(`📥 Đã lưu email mới từ [${senderStr}] (Phishing: ${securityCheck.isPhishing}) vào MongoDB!`);
+                console.log(`📥 Đã lưu email mới từ [${senderStr}] kèm AI Analysis vào MongoDB!`);
             }
         }
 
@@ -156,11 +188,12 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
 
         const rawUpdatedEmails = await Email.find({ userId }).sort({ receivedAt: -1 }).lean();
         const updatedEmails = rawUpdatedEmails.map((mail: any) => {
-            const analysis = analyzeEmailSecurity(mail.subject, mail.bodyText || mail.aiSummary, typeof mail.sender === 'string' ? mail.sender : mail.sender?.email);
+            const isPhishing = Boolean(mail.isPhishing);
+            const securityStatus = isPhishing ? 'phishing' : (mail.aiCategory === 'Phishing' ? 'phishing' : 'safe');
             return {
                 ...mail,
-                securityStatus: analysis.securityStatus,
-                isPhishing: analysis.isPhishing || mail.isPhishing
+                securityStatus,
+                isPhishing
             };
         });
 
@@ -175,7 +208,7 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Gửi email phản hồi bằng tài khoản SMTP cá nhân của User, Cập nhật Token & Trạng thái DB
+ * Gửi email phản hồi
  */
 export const sendReply = async (req: AuthRequest, res: Response) => {
     try {
@@ -245,6 +278,33 @@ export const sendReply = async (req: AuthRequest, res: Response) => {
         return res.status(500).json({
             message: 'Không thể gửi email. Vui lòng kiểm tra lại cấu hình App Password trong Cài đặt tài khoản!',
             error: error.message || error,
+        });
+    }
+};
+
+/**
+ * Lấy danh sách câu trả lời gợi ý từ AI
+ */
+export const getQuickReplies = async (req: AuthRequest, res: Response) => {
+    try {
+        const { subject, body, category } = req.body;
+
+        const suggestions = await getQuickRepliesFromAI(
+            subject || '',
+            body || '',
+            category
+        );
+
+        return res.status(200).json({
+            success: true,
+            suggestions
+        });
+    } catch (error) {
+        console.error('Lỗi khi lấy gợi ý AI:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Không thể tạo gợi ý từ AI lúc này.',
+            error: error instanceof Error ? error.message : error
         });
     }
 };

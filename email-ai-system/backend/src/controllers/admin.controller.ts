@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import User from '../models/User';
-import Email from '../models/Email'; 
+import Email from '../models/Email';
 
 // Lấy danh sách toàn bộ người dùng
 export const getUsers = async (req: AuthRequest, res: Response) => {
@@ -17,7 +17,7 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
 export const updateUserRole = async (req: AuthRequest, res: Response) => {
   try {
     const { userId } = req.params;
-    const { role } = req.body; // 'admin' hoặc 'user'
+    const { role } = req.body;
 
     const updatedUser = await User.findByIdAndUpdate(userId, { role }, { new: true }).select('-password');
     return res.status(200).json({ success: true, message: 'Cập nhật quyền thành công', data: updatedUser });
@@ -44,7 +44,7 @@ export const getSystemStats = async (req: AuthRequest, res: Response) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalEmails = await Email.countDocuments();
-    const processedEmails = await Email.countDocuments({ status: 'Resolved' });
+    const processedEmails = await Email.countDocuments({ status: 'PROCESSED' as any });
     const tokenStats = await User.aggregate([
       { $group: { _id: null, totalTokensUsed: { $sum: '$tokensUsed' } } }
     ]);
