@@ -12,22 +12,22 @@ const lastSyncMap = new Map<string, number>();
 const COOLDOWN_MS = 15000; // Cooldown 15 giây giữa các lần quét thực tế
 
 /**
- * Hàm phân tích rủi ro lừa đảo phụ trợ (dùng làm dự phòng khi AI không hoạt động)
+ * Hàm phân tích rủi ro lừa đảo phụ trợ (dùng làm dự phòng hoặc tăng cường phát hiện phishing)
  */
 const analyzeEmailSecurity = (subject?: string, snippet?: string, sender?: string): { isPhishing: boolean; securityStatus: 'safe' | 'warning' | 'phishing' } => {
     let riskScore = 0;
 
     const phishingKeywords = [
         'urgent', 'verify your account', 'password reset', 'trúng thưởng',
-        'đăng nhập ngay', 'khóa tài khoản', 'cảnh báo khẩn cấp',
-        'suspended', 'update billing', 'click here immediately', 'xác thực tài khoản'
+        'đăng nhập ngay', 'khóa tài khoản', 'cảnh báo khẩn cấp', 'iphone',
+        'suspended', 'update billing', 'click here immediately', 'xác thực tài khoản', 'phần quà'
     ];
 
     const content = `${subject || ''} ${snippet || ''}`.toLowerCase();
 
     phishingKeywords.forEach(keyword => {
         if (content.includes(keyword)) {
-            riskScore += 2;
+            riskScore += 3; // Tăng trọng số rủi ro khi có từ khóa nhạy cảm / trúng thưởng giả mạo
         }
     });
 
@@ -169,22 +169,27 @@ export const syncEmails = async (req: AuthRequest, res: Response) => {
                     };
                 }
 
+                // Xác định chính xác trạng thái Phishing và điểm ưu tiên dựa trên kết hợp AI và bộ lọc quy tắc
+                const isPhishingFinal = Boolean(aiAnalysis.isPhishing || securityCheck.isPhishing || aiAnalysis.aiCategory === 'Phishing');
+                const finalPriorityScore = isPhishingFinal ? 9 : (typeof aiAnalysis.priorityScore === 'number' ? aiAnalysis.priorityScore : 5);
+                const finalCategory = isPhishingFinal ? 'Phishing' : (aiAnalysis.aiCategory || 'General');
+
                 await Email.create({
                     userId,
                     messageId: mail.messageId || `MSG-${Date.now()}-${Math.random()}`,
                     sender: senderObj,
                     subject: mail.subject || '(Không có tiêu đề)',
                     bodyText: mail.bodyText || '',
-                    priorityScore: typeof aiAnalysis.priorityScore === 'number' ? aiAnalysis.priorityScore : 5,
-                    aiCategory: aiAnalysis.aiCategory || 'General',
-                    isPhishing: Boolean(aiAnalysis.isPhishing || securityCheck.isPhishing),
+                    priorityScore: finalPriorityScore,
+                    aiCategory: finalCategory,
+                    isPhishing: isPhishingFinal,
                     aiSummary: aiAnalysis.aiSummary || '',
-                    suggestedReply: aiAnalysis.suggestedReply || '',
+                    suggestedReply: isPhishingFinal ? '' : (aiAnalysis.suggestedReply || ''),
                     status: 'Pending',
                     isAutoReplied: false,
                     receivedAt: mail.receivedAt ? new Date(mail.receivedAt) : new Date(),
                 });
-                console.log(`📥 Đã lưu email mới từ [${senderStr}] kèm AI Analysis vào MongoDB!`);
+                console.log(`📥 Đã lưu email mới từ [${senderStr}] kèm phân tích bảo mật vào MongoDB!`);
             }
         }
 
